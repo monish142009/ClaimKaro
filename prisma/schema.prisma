@@ -1,0 +1,230 @@
+// ClaimKaro data model (Phase 2).
+// Privacy: UserProfile intentionally has NO Aadhaar, PAN, bank, phone, OTP or ID fields.
+// Scheme data seeded by prisma/seed.ts is UNVERIFIED draft data until an admin verifies it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum SchemeLevel {
+  CENTRAL
+  STATE
+}
+
+enum VerificationStatus {
+  VERIFIED
+  UNVERIFIED
+  OUTDATED
+  RETIRED
+}
+
+enum RuleType {
+  NUMERIC_MIN
+  NUMERIC_MAX
+  ONE_OF
+  EQUALS
+  BOOLEAN
+  INFO_ONLY
+}
+
+enum RuleStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum ChecklistStatus {
+  PENDING
+  DONE
+}
+
+// NOTE: status is entered manually by the user and is NOT verified against government systems.
+enum ApplicationStatus {
+  INTERESTED
+  PREPARING_DOCUMENTS
+  READY_TO_APPLY
+  APPLIED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum ReminderSource {
+  VERIFIED_DEADLINE
+  CUSTOM
+}
+
+model Scheme {
+  id                  String             @id @default(cuid())
+  slug                String             @unique
+  name                String
+  shortName           String?
+  department          String
+  level               SchemeLevel
+  state               String             @default("Telangana")
+  beneficiaryGroup    String
+  description         String
+  benefitSummary      String?
+  applicationUrl      String?
+  officialSourceUrl   String?
+  verificationStatus  VerificationStatus @default(UNVERIFIED)
+  lastVerifiedAt      DateTime?
+  deadline            DateTime?
+  deadlineNote        String?
+  published           Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  rules               SchemeRule[]
+  evidence            SchemeEvidence[]
+  verificationRecords VerificationRecord[]
+  checklistItems      ChecklistItem[]
+  applications        TrackedApplication[]
+  reminders           Reminder[]
+  savedBy             SavedScheme[]
+
+  @@index([published])
+}
+
+model SchemeRule {
+  id          String          @id @default(cuid())
+  schemeId    String
+  scheme      Scheme          @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  key         String
+  label       String
+  ruleType    RuleType
+  valueJson   String
+  required    Boolean         @default(true)
+  sensitive   Boolean         @default(false)
+  evidenceId  String?
+  evidence    SchemeEvidence? @relation(fields: [evidenceId], references: [id], onDelete: SetNull)
+  status      RuleStatus      @default(DRAFT)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([schemeId])
+  @@index([evidenceId])
+}
+
+model SchemeEvidence {
+  id          String       @id @default(cuid())
+  schemeId    String
+  scheme      Scheme       @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  sourceUrl   String
+  sourceTitle String
+  quotedText  String?
+  verifiedAt  DateTime?
+  verifiedBy  String?
+  notes       String?
+  rules       SchemeRule[]
+
+  @@index([schemeId])
+}
+
+model VerificationRecord {
+  id        String   @id @default(cuid())
+  schemeId  String
+  scheme    Scheme   @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  action    String
+  note      String?
+  actor     String
+  createdAt DateTime @default(now())
+
+  @@index([schemeId])
+}
+
+model UserProfile {
+  id             String   @id @default(cuid())
+  displayName    String?
+  language       String   @default("en")
+  age            Int?
+  state          String?
+  district       String?
+  educationLevel String?
+  occupation     String?
+  annualIncome   Int?
+  incomeBand     String?
+  isGuest        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  checklistItems ChecklistItem[]
+  applications   TrackedApplication[]
+  reminders      Reminder[]
+  savedSchemes   SavedScheme[]
+}
+
+model ChecklistItem {
+  id           String          @id @default(cuid())
+  profileId    String
+  profile      UserProfile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  schemeId     String
+  scheme       Scheme          @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  documentName String
+  status       ChecklistStatus @default(PENDING)
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([profileId, schemeId, documentName])
+  @@index([schemeId])
+}
+
+model TrackedApplication {
+  id              String            @id @default(cuid())
+  profileId       String
+  profile         UserProfile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  schemeId        String
+  scheme          Scheme            @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  // status is entered manually by the user and is NOT verified against government systems.
+  status          ApplicationStatus @default(INTERESTED)
+  followUpDate    DateTime?
+  notes           String?
+  statusUpdatedAt DateTime          @default(now())
+  createdAt       DateTime          @default(now())
+  events          TrackerEvent[]
+
+  @@unique([profileId, schemeId])
+  @@index([schemeId])
+}
+
+model TrackerEvent {
+  id            String             @id @default(cuid())
+  applicationId String
+  application   TrackedApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  createdAt     DateTime           @default(now())
+
+  @@index([applicationId])
+}
+
+model Reminder {
+  id        String         @id @default(cuid())
+  profileId String
+  profile   UserProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  schemeId  String?
+  scheme    Scheme?        @relation(fields: [schemeId], references: [id], onDelete: SetNull)
+  title     String
+  remindAt  DateTime
+  source    ReminderSource
+  done      Boolean        @default(false)
+  createdAt DateTime       @default(now())
+
+  @@index([profileId])
+  @@index([schemeId])
+}
+
+model SavedScheme {
+  id        String      @id @default(cuid())
+  profileId String
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  schemeId  String
+  scheme    Scheme      @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([profileId, schemeId])
+  @@index([schemeId])
+}
